@@ -1,0 +1,22 @@
+Befor use easyapns, you must registered your devices.
+Example:
+http://server.com/server/easyapns/apns/?task=register&clientid=123&appname=My%20App&appversion=1.0.1&deviceuid=[Device uid]&devicetoken=[Device token]&devicename=My%20Awesome%20iPhone&devicemodel=iPhone&deviceversion=3.1.2&pushbadge=enabled&pushalert=disabled&pushsound=enabled
+
+For push message you can use:
+<?php
+$ids = array(1,2,3,4);
+$message = 'Some text';
+$easyapns = Yii::app()->getModule('easyapns');
+            $easyapns->CreateMessage( $ids );
+            $easyapns->AddMessage($message);
+            $easyapns->AddMessageBadge();
+            $easyapns->AddMessageSound();
+            $easyapns->PushMessages();
+?>
+
+Additional methods: 
+http://server.com/server/easyapns/apns/?task=fetch
+http://server.com/server/easyapns/apns/?task=flush
+
+More description you can find: http://www.easyapns.com
+
