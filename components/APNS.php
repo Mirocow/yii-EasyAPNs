@@ -281,7 +281,7 @@ class APNS extends CComponent {
     * @param string $clientid The clientid of the app for message grouping
    * @access private
    */
-  public function registerDevice($appname, $appversion, $deviceuid, $devicetoken, $devicename, $devicemodel, $deviceversion, $pushbadge, $pushalert, $pushsound, $clientid = NULL){
+  public function registerDevice($appname, $appversion, $deviceuid, $devicetoken, $devicename, $devicemodel, $deviceversion, $pushbadge, $pushalert, $pushsound, $clientid = 0){
 
     if(strlen($appname)==0) $this->_triggerError('Application Name must not be blank.', E_USER_ERROR);
     else if(strlen($appversion)==0) $this->_triggerError('Application Version must not be blank.', E_USER_ERROR);
@@ -310,7 +310,7 @@ class APNS extends CComponent {
           :pushbadge,
           :pushalert,
           :pushsound,
-          'production',
+          'sandbox', /* sandbox, production */
           'active',
           NOW(),
           NOW()
@@ -384,7 +384,7 @@ class APNS extends CComponent {
       ORDER BY `apns_messages`.`created` ASC
       LIMIT 100;";
 
-    $this->_iterateMessages($sql);
+      $this->_iterateMessages($sql);
   }
 
   /**
@@ -447,7 +447,7 @@ class APNS extends CComponent {
       }
     }
   }
-
+  
   /**
    * Connect the SSL stream (sandbox or production)
    *
@@ -496,7 +496,6 @@ class APNS extends CComponent {
     if(strlen($message)==0) $this->_triggerError('Missing message.', E_USER_ERROR);
     if(strlen($token)==0) $this->_triggerError('Missing message token.', E_USER_ERROR);
     if(strlen($development)==0) $this->_triggerError('Missing development status.', E_USER_ERROR);
-
     $fp = false;
     if(isset($this->sslStreams[$development])) {
       $fp = $this->sslStreams[$development];
@@ -507,6 +506,10 @@ class APNS extends CComponent {
       $this->_triggerError("A connected socket to APNS wasn't available.");
     }
     else {
+      
+      // Encode UTF-8
+	  // $message = utf8_encode($message); //btw, $message IS NOT A STRING
+      
       // "For optimum performance, you should batch multiple notifications in a single transmission over the
       // interface, either explicitly or using a TCP/IP Nagle algorithm."
 
@@ -518,7 +521,7 @@ class APNS extends CComponent {
       // 1: 1. 4: Identifier. 4: Expiry. 2: Token length. 32: Device Token. 2: Payload length. 34: Payload
       $expiry = time()+120; // 2 minute validity hard coded!
       $msg = chr(1).pack("N",$pid).pack("N",$expiry).pack("n",32).pack('H*',$token).pack("n",strlen($message)).$message;
-
+      
       $fwrite = fwrite($fp, $msg);
       if(!$fwrite) {
         $this->_pushFailed($pid);
@@ -680,10 +683,10 @@ class APNS extends CComponent {
    */
   private function _jsonEncode($array=false){
     //Using json_encode if exists
-    if(function_exists('json_encode')){
+    /*if(function_exists('json_encode')){
       return json_encode($array);
-    }
-                if(is_null($array)) return 'null';
+    }*/
+    if(is_null($array)) return 'null';
     if($array === false) return 'false';
     if($array === true) return 'true';
     if(is_scalar($array)){
@@ -712,7 +715,8 @@ class APNS extends CComponent {
       foreach ($array as $k => $v) $result[] = $this->_jsonEncode($k).':'.$this->_jsonEncode($v);
       return '{' . join(',', $result) . '}';
     }
-  }
+
+  } 
 
   /**
    * Start a New Message
@@ -738,19 +742,19 @@ class APNS extends CComponent {
    * @param string $delivery Possible future date to send the message.
    * @access public
    */
-  public function newMessage($fk_device=NULL, $delivery=NULL, $clientId=NULL){
+  public function newMessage($fk_devices=NULL, $delivery=NULL, $clientId=0){
     if(isset($this->message)){
       unset($this->message);
       $this->_triggerError('An existring message already created but not delivered. The previous message has been removed. Use queueMessage() to complete a message.');
     }
 
     // If no device is specified then that means we sending a message to all.
-    if (is_null($fk_device))
+    if (is_null($fk_devices))
     {
       $sql = "SELECT `pid` FROM {{apns_devices}} WHERE `status`='active'";
 
       // Only to a set of client?
-      if (!is_null($clientId))
+      if ($clientId)
         $sql .= " AND `clientid` = '{$clientId}'";
 
       $ids = array();
@@ -761,13 +765,13 @@ class APNS extends CComponent {
         while (($row = $result->read())!==false)
           $ids[] = $row['pid'];
 
-      $fk_device = $ids;
+      $fk_devices = $ids;
     }
 
     $this->message = array();
     $this->message['aps'] = array();
     $this->message['aps']['clientid'] = $clientId;
-    $this->message['send']['to'] = $fk_device;
+    $this->message['send']['to'] = $fk_devices;
     $this->message['send']['when'] = $delivery;
   }
 
@@ -779,23 +783,25 @@ class APNS extends CComponent {
    * @param string $delivery Possible future date to send the message.
    * @access public
    */
-  public function newMessageByDeviceUId($deviceUId=NULL, $delivery=NULL, $clientId=NULL) {
+  public function newMessageByDeviceUId($deviceUId=NULL, $delivery=NULL, $clientId=0) {
 
-    $sql = "SELECT `pid` FROM {{apns_devices}} WHERE `deviceuid`='$deviceUId'";
+    $sql = "SELECT `pid` FROM {{apns_devices}} WHERE `deviceuid` IN ('" . implode("','",$deviceUId) . "')";
 
     //$result = $this->db->query($sql);
-    $command=$this->_db->createCommand($sql);
+    $command=$this->_db->createCommand($sql)->query();
     //$row = $result->fetch_array(MYSQLI_ASSOC);
-    $row=$command->readAll();
+    $rows = $command->readAll();
     
-    if ($row != NULL)
-      $this->newMessage ($row["pid"], $delivery, $clientId);
-
+    if(!$rows) return FALSE;
+    
+    $fk_devices = array();
+    foreach($rows as $row)
+      $fk_devices[] = $row['pid'];
+    
+    if ($row)
+      $this->newMessage ($fk_devices, $delivery, $clientId = 0);
 
   }
-
-
-
 
   /**
    * Queue Message for Delivery
@@ -823,7 +829,7 @@ class APNS extends CComponent {
     // loop through possible users
     $to = $this->message['send']['to'];
     $when = $this->message['send']['when'];
-    $clientId = is_null($this->message['aps']['clientid']) ? null : $this->message['aps']['clientid'];
+    $clientId = $this->message['aps']['clientid'];
     $list = (is_array($to)) ? $to : array($to);
     unset($this->message['send']);
 
@@ -844,7 +850,7 @@ class APNS extends CComponent {
       SELECT `pid`, `pushbadge`, `pushalert`, `pushsound`
       FROM {{apns_devices}}
       WHERE `pid` IN (" . implode(', ', $list) . ")
-        AND `status`='active'" . (is_null($clientId) ? '' : " AND `clientid` = :clientId");
+        AND `status`='active'" . ($clientId ? '' : " AND `clientid` = :clientId");
 
     //$result = $this->db->query($sql);    
     $command=$this->_db->createCommand($sql);
@@ -895,8 +901,8 @@ class APNS extends CComponent {
           unset($usermessage['aps']['sound']);
         }
 
-        if(is_null($usermessage['aps']['clientid'])) {
-          unset($usermessage['aps']['clientid']);
+        if($usermessage['aps']['clientid']) {
+          $usermessage['aps']['clientid'] = 0;
         }
 
         if(empty($usermessage['aps'])) {
@@ -922,7 +928,6 @@ class APNS extends CComponent {
             );";
         //$this->db->query($sql);
         $command=$this->_db->createCommand($sql);
-        $clientId = is_null($clientId)? '': $clientId; 
         $command->bindParam(":clientId",$clientId,PDO::PARAM_STR);
         $command->bindParam(":fk_device",$fk_device,PDO::PARAM_STR);
         $command->bindParam(":message",$message,PDO::PARAM_STR);
