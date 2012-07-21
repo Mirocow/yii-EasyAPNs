@@ -1,18 +1,146 @@
+Install:
+
+protected/config/main.php
+Please insert code in the next sections:
+
+	...
+	'import'=>array(
+	...
+			// yii-EasyAPNs
+			'application.modules.yii-EasyAPNs.*',
+	...
+	),
+	...
+	'modules'=>array(
+	...
+			'easyapns'=>array(
+				'class'=>'application.modules.yii-EasyAPNs.EasyAPNsModule',
+				'development' => 'sandbox', // sandbox, production
+			),
+	...
+	),
+	..
+
+SQL:
+DROP TABLE IF EXISTS `tbl_apns_device_history`;
+CREATE TABLE `tbl_apns_device_history` (
+  `pid` INT(9) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`clientid` VARCHAR(64) NOT NULL DEFAULT '0',
+  `appname` VARCHAR(255) NOT NULL,
+  `appversion` VARCHAR(25) DEFAULT NULL,
+  `deviceuid` CHAR(40) NOT NULL,
+  `devicetoken` CHAR(64) NOT NULL,
+  `devicename` VARCHAR(255) NOT NULL,
+  `devicemodel` VARCHAR(100) NOT NULL,
+  `deviceversion` VARCHAR(25) NOT NULL,
+  `pushbadge` ENUM('disabled','enabled') DEFAULT 'disabled',
+  `pushalert` ENUM('disabled','enabled') DEFAULT 'disabled',
+  `pushsound` ENUM('disabled','enabled') DEFAULT 'disabled',
+  `development` ENUM('production','sandbox') CHARACTER SET latin1 NOT NULL DEFAULT 'production',
+  `status` ENUM('active','uninstalled') NOT NULL DEFAULT 'active',
+  `archived` DATETIME NOT NULL,
+  PRIMARY KEY (`pid`),
+  KEY `devicetoken` (`devicetoken`),
+  KEY `devicename` (`devicename`),
+  KEY `devicemodel` (`devicemodel`),
+  KEY `deviceversion` (`deviceversion`),
+  KEY `pushbadge` (`pushbadge`),
+  KEY `pushalert` (`pushalert`),
+  KEY `pushsound` (`pushsound`),
+  KEY `development` (`development`),
+  KEY `status` (`status`),
+  KEY `appname` (`appname`),
+  KEY `appversion` (`appversion`),
+  KEY `deviceuid` (`deviceuid`),
+  KEY `archived` (`archived`)
+) ENGINE=MYISAM DEFAULT CHARSET=utf8 COMMENT='Store unique device history';
+
+DROP TABLE IF EXISTS `tbl_apns_devices`;
+CREATE TABLE `tbl_apns_devices` (
+  `pid` INT(9) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `clientid` VARCHAR(64) NOT NULL DEFAULT '0',
+  `appname` VARCHAR(255) NOT NULL,
+  `appversion` VARCHAR(25) DEFAULT NULL,
+  `deviceuid` CHAR(40) NOT NULL,
+  `devicetoken` CHAR(64) NOT NULL,
+  `devicename` VARCHAR(255) NOT NULL,
+  `devicemodel` VARCHAR(100) NOT NULL,
+  `deviceversion` VARCHAR(25) NOT NULL,
+  `pushbadge` ENUM('disabled','enabled') DEFAULT 'disabled',
+  `pushalert` ENUM('disabled','enabled') DEFAULT 'disabled',
+  `pushsound` ENUM('disabled','enabled') DEFAULT 'disabled',
+  `development` ENUM('production','sandbox') CHARACTER SET latin1 NOT NULL DEFAULT 'production',
+  `status` ENUM('active','uninstalled') NOT NULL DEFAULT 'active',
+  `created` DATETIME NOT NULL,
+  `modified` TIMESTAMP NOT NULL DEFAULT '0000-00-00 00:00:00' ON UPDATE CURRENT_TIMESTAMP,
+  `os` VARCHAR(32) DEFAULT '''iphone''',
+  PRIMARY KEY (`pid`),
+  UNIQUE KEY `appname` (`appname`,`appversion`,`deviceuid`),
+  KEY `devicetoken` (`devicetoken`),
+  KEY `devicename` (`devicename`),
+  KEY `devicemodel` (`devicemodel`),
+  KEY `deviceversion` (`deviceversion`),
+  KEY `pushbadge` (`pushbadge`),
+  KEY `pushalert` (`pushalert`),
+  KEY `pushsound` (`pushsound`),
+  KEY `development` (`development`),
+  KEY `status` (`status`),
+  KEY `created` (`created`),
+  KEY `modified` (`modified`)
+) ENGINE=MYISAM AUTO_INCREMENT=0 DEFAULT CHARSET=utf8 COMMENT='Store unique devices';
+
+CREATE TRIGGER `APNsArchive` BEFORE UPDATE ON `tbl_apns_devices` FOR EACH ROW INSERT INTO `tbl_apns_device_history` VALUES (
+    NULL,
+		OLD.`clientid`,
+    OLD.`appname`,
+    OLD.`appversion`,
+    OLD.`deviceuid`,
+    OLD.`devicetoken`,
+    OLD.`devicename`,
+    OLD.`devicemodel`,
+    OLD.`deviceversion`,
+    OLD.`pushbadge`,
+    OLD.`pushalert`,
+    OLD.`pushsound`,
+    OLD.`development`,
+    OLD.`status`,
+    NOW()
+);;
+DELIMITER ;
+
+DROP TABLE IF EXISTS `tbl_apns_messages`;
+CREATE TABLE `tbl_apns_messages` (
+  `pid` INT(9) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `clientid` INT(11) DEFAULT NULL,
+  `fk_device` INT(9) UNSIGNED NOT NULL,
+  `message` TEXT NOT NULL,
+  `delivery` DATETIME NOT NULL,
+  `status` ENUM('queued','delivered','failed') CHARACTER SET latin1 NOT NULL DEFAULT 'queued',
+  `created` DATETIME NOT NULL,
+  `modified` TIMESTAMP NOT NULL DEFAULT '0000-00-00 00:00:00' ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`pid`),
+  KEY `fk_device` (`fk_device`),
+  KEY `status` (`status`),
+  KEY `created` (`created`),
+  KEY `modified` (`modified`),
+  KEY `delivery` (`delivery`)
+) ENGINE=MYISAM AUTO_INCREMENT=0 DEFAULT CHARSET=utf8 COMMENT='Messages to push to APNS';
+
 Befor use easyapns, you must registered your devices.
 Example:
 http://server.com/server/easyapns/apns/?task=register&clientid=123&appname=My%20App&appversion=1.0.1&deviceuid=[Device uid]&devicetoken=[Device token]&devicename=My%20Awesome%20iPhone&devicemodel=iPhone&deviceversion=3.1.2&pushbadge=enabled&pushalert=disabled&pushsound=enabled
 
 For push message you can use:
-<?php
-$ids = array(1,2,3,4);
-$message = 'Some text';
-$easyapns = Yii::app()->getModule('easyapns');
-            $easyapns->CreateMessage( $ids );
-            $easyapns->AddMessage($message);
-            $easyapns->AddMessageBadge();
-            $easyapns->AddMessageSound();
-            $easyapns->PushMessages();
-?>
+	<?php
+	$ids = array(1,2,3,4);
+	$message = 'Some text';
+	$easyapns = Yii::app()->getModule('easyapns');
+	$easyapns->CreateMessage( $ids );
+	$easyapns->AddMessage($message);
+	$easyapns->AddMessageBadge();
+	$easyapns->AddMessageSound();
+	$easyapns->PushMessages();
+	?>
 
 Additional methods: 
 http://server.com/server/easyapns/apns/?task=fetch
