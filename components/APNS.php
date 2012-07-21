@@ -72,7 +72,10 @@ $apns->queueMessage();
  */
 
 class APNS extends CComponent {
-
+  
+  // sandbox, production
+  private $_development = 'production';
+  
   /**
   * Connection to MySQL
   *
@@ -211,9 +214,10 @@ class APNS extends CComponent {
    * @param string $logPath Path to the log file.
    * @access   public
    */
-  function __construct($certificate=NULL, $sandboxCertificate=NULL, $logPath=NULL) {
+  function __construct($certificate=NULL, $sandboxCertificate=NULL, $logPath=NULL, $development = 'production') {
     
     $this->_db=Yii::app()->db;
+    $this->_development = $development;
 
     if(!empty($certificate) && file_exists($certificate))
     {
@@ -278,10 +282,10 @@ class APNS extends CComponent {
    * @param string $pushbadge Whether Badge Pushing is Enabled or Disabled
     * @param string $pushalert Whether Alert Pushing is Enabled or Disabled
     * @param string $pushsound Whether Sound Pushing is Enabled or Disabled
-    * @param string $clientid The clientid of the app for message grouping
+    * @param string $clientId The clientid of the app for message grouping
    * @access private
    */
-  public function registerDevice($appname, $appversion, $deviceuid, $devicetoken, $devicename, $devicemodel, $deviceversion, $pushbadge, $pushalert, $pushsound, $clientid = 0){
+  public function registerDevice($appname, $appversion, $deviceuid, $devicetoken, $devicename, $devicemodel, $deviceversion, $pushbadge, $pushalert, $pushsound, $clientId=0){
 
     if(strlen($appname)==0) $this->_triggerError('Application Name must not be blank.', E_USER_ERROR);
     else if(strlen($appversion)==0) $this->_triggerError('Application Version must not be blank.', E_USER_ERROR);
@@ -293,7 +297,7 @@ class APNS extends CComponent {
     else if($pushbadge!='disabled' && $pushbadge!='enabled') $this->_triggerError('Push Badge must be either Enabled or Disabled.', E_USER_ERROR);
     else if($pushalert!='disabled' && $pushalert!='enabled') $this->_triggerError('Push Alert must be either Enabled or Disabled.', E_USER_ERROR);
     else if($pushsound!='disabled' && $pushsound!='enabled') $this->_triggerError('Push Sount must be either Enabled or Disabled.', E_USER_ERROR);
-
+    
     // store device for push notifications
     //$this->db->query("SET NAMES 'utf8';"); // force utf8 encoding if not your default
     $sql = "INSERT INTO {{apns_devices}}
@@ -310,7 +314,7 @@ class APNS extends CComponent {
           :pushbadge,
           :pushalert,
           :pushsound,
-          'sandbox', /* sandbox, production */
+          {$this->_development},
           'active',
           NOW(),
           NOW()
@@ -325,8 +329,8 @@ class APNS extends CComponent {
         `pushsound`=:pushsound,
         `status`='active',
         `modified`=NOW();";
-    $command=$this->_db->createCommand($sql);
-    $command->bindParam(":clientid",$clientid,PDO::PARAM_STR);
+    $command=$this->_db->createCommand($sql);	
+    $command->bindParam(":clientid",$clientId,PDO::PARAM_STR);
     $command->bindParam(":appname",$appname,PDO::PARAM_STR);
     $command->bindParam(":appversion",$appversion,PDO::PARAM_STR);
     $command->bindParam(":deviceuid",$deviceuid,PDO::PARAM_STR);
@@ -520,7 +524,14 @@ class APNS extends CComponent {
       // Enhanced notification format: ("recommended for most providers")
       // 1: 1. 4: Identifier. 4: Expiry. 2: Token length. 32: Device Token. 2: Payload length. 34: Payload
       $expiry = time()+120; // 2 minute validity hard coded!
-      $msg = chr(1).pack("N",$pid).pack("N",$expiry).pack("n",32).pack('H*',$token).pack("n",strlen($message)).$message;
+      $msg = 
+        chr(1). // Command
+        pack("N",$pid). // Identifier (4)
+        pack("N",$expiry). // Expiry (4) 
+        pack("n",32). // (2)
+        pack('H*',$token). // (32)
+        pack("n",strlen($message)). // (2)
+        $message; // (34)
       
       $fwrite = fwrite($fp, $msg);
       if(!$fwrite) {
@@ -553,9 +564,13 @@ class APNS extends CComponent {
           $this->_triggerError("Failed selecting stream to read.", E_USER_ERROR);
         }
         else if($numChanged>0) {
+          
           $command = ord(fread($fp, 1));
           $status = ord(fread($fp, 1));
-          $identifier = implode('', unpack("N", fread($fp, 4)));
+          $identifier = unpack("N", fread($fp, 4));
+          if(is_array($identifier))
+            $identifier = implode('', $identifier); 
+          
           $statusDesc = array(
             0 => 'No errors encountered',
             1 => 'Processing error',
@@ -668,8 +683,6 @@ class APNS extends CComponent {
   private function _triggerError($error, $type=E_USER_NOTICE){
     if($this->logErrors)
       Yii::log($error, CLogger::LEVEL_ERROR, 'php');
-      
-    //if($this->showErrors) trigger_error($error, $type);
   }
 
   /**
@@ -751,21 +764,14 @@ class APNS extends CComponent {
     // If no device is specified then that means we sending a message to all.
     if (is_null($fk_devices))
     {
-      $sql = "SELECT `pid` FROM {{apns_devices}} WHERE `status`='active'";
-
-      // Only to a set of client?
-      if ($clientId)
-        $sql .= " AND `clientid` = '{$clientId}'";
-
-      $ids = array();
-      //$result = $this->db->query($sql);
-      $result=$this->_db->createCommand($sql)->query();
+      $sql = "SELECT `pid` FROM {{apns_devices}} WHERE `status`='active' AND `clientid` = '{$clientId}'";
+      $command=$this->_db->createCommand($sql)->query();
+      $rows = $command->readAll();    
+      if(!$rows) return FALSE;
       
-      if($result->count())
-        while (($row = $result->read())!==false)
-          $ids[] = $row['pid'];
-
-      $fk_devices = $ids;
+      $fk_devices = array();
+      foreach($rows as $row)
+        $fk_devices[] = $row['pid'];
     }
 
     $this->message = array();
@@ -786,20 +792,15 @@ class APNS extends CComponent {
   public function newMessageByDeviceUId($deviceUId=NULL, $delivery=NULL, $clientId=0) {
 
     $sql = "SELECT `pid` FROM {{apns_devices}} WHERE `deviceuid` IN ('" . implode("','",$deviceUId) . "')";
-
-    //$result = $this->db->query($sql);
     $command=$this->_db->createCommand($sql)->query();
-    //$row = $result->fetch_array(MYSQLI_ASSOC);
-    $rows = $command->readAll();
-    
+    $rows = $command->readAll();    
     if(!$rows) return FALSE;
     
     $fk_devices = array();
     foreach($rows as $row)
       $fk_devices[] = $row['pid'];
     
-    if ($row)
-      $this->newMessage ($fk_devices, $delivery, $clientId = 0);
+    $this->newMessage($fk_devices, $delivery, $clientId);
 
   }
 
@@ -822,15 +823,22 @@ class APNS extends CComponent {
    * @access public
    */
   public function queueMessage(){
+       
     // check to make sure a message was created
-    if (!isset($this->message))
+    if (!isset($this->message)){
       $this->_triggerError('You cannot Queue a message that has not been created. Use newMessage() to create a new message.');
-
+      return;
+    }
+      
+    if (!isset($this->message['send'])){
+      $this->_triggerError('The sender list is empty.');
+      return;
+    }          
+      
     // loop through possible users
-    $to = $this->message['send']['to'];
     $when = $this->message['send']['when'];
-    $clientId = $this->message['aps']['clientid'];
-    $list = (is_array($to)) ? $to : array($to);
+    $clientId = (int)$this->message['aps']['clientid'];
+    $list = (is_array($this->message['send']['to'])) ? $this->message['send']['to'] : array($this->message['send']['to']);
     unset($this->message['send']);
 
     // Lets make sure that the recipients are integers. If not then just remove
@@ -850,12 +858,10 @@ class APNS extends CComponent {
       SELECT `pid`, `pushbadge`, `pushalert`, `pushsound`
       FROM {{apns_devices}}
       WHERE `pid` IN (" . implode(', ', $list) . ")
-        AND `status`='active'" . ($clientId ? '' : " AND `clientid` = :clientId");
-
-    //$result = $this->db->query($sql);    
-    $command=$this->_db->createCommand($sql);
+        AND `status`='active' AND `clientid` = :clientId";
+    
+    $command=$this->_db->createCommand($sql);	
     $command->bindParam(":clientId",$clientId,PDO::PARAM_STR);
-
     $result=$command->query();    
 
     if (!$result->count())
@@ -876,7 +882,7 @@ class APNS extends CComponent {
       if($pushbadge=='disabled' && $pushalert=='disabled' && $pushsound=='disabled')
         $deliver = false;
 
-      if($deliver===false && $result->num_rows > 0) {
+      if($deliver===false) {
         $this->_triggerError('This user has disabled all push notifications. Message will not be delivered.');
       }
       else if($deliver===true) {
@@ -901,10 +907,6 @@ class APNS extends CComponent {
           unset($usermessage['aps']['sound']);
         }
 
-        if($usermessage['aps']['clientid']) {
-          $usermessage['aps']['clientid'] = 0;
-        }
-
         if(empty($usermessage['aps'])) {
           unset($usermessage['aps']);
         }
@@ -926,8 +928,8 @@ class APNS extends CComponent {
               NOW(),
               NOW()
             );";
-        //$this->db->query($sql);
         $command=$this->_db->createCommand($sql);
+		
         $command->bindParam(":clientId",$clientId,PDO::PARAM_STR);
         $command->bindParam(":fk_device",$fk_device,PDO::PARAM_STR);
         $command->bindParam(":message",$message,PDO::PARAM_STR);
@@ -1105,7 +1107,7 @@ class APNS extends CComponent {
    */
   public function processQueue(){
     $this->fetchMessages();
-  }
+  } 
   
 }
 ?>

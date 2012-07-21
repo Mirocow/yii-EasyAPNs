@@ -3,6 +3,8 @@
 class EasyAPNsModule extends CWebModule
 {
   
+    private $_development = 'production';  
+  
     private $_apns;  
   
     public function init()
@@ -23,7 +25,7 @@ class EasyAPNsModule extends CWebModule
           $production_sertificate = "$config_path/apns.pem"; 
         if(is_file("$config_path/apns-dev.pem"))
           $sandbox_certificate = "$config_path/apns-dev.pem";        
-        $this->_apns  = new APNS($production_sertificate,$sandbox_certificate);        
+        $this->_apns  = new APNS($production_sertificate,$sandbox_certificate, $this->_development);        
         
     }
     
@@ -64,4 +66,12 @@ class EasyAPNsModule extends CWebModule
         else
             return false;
     }
+    
+    public function SetDevelopment($development){
+      $this->_development = $development;
+    }
+    
+    public function GetDevelopment(){
+      return $this->_development;
+    }    
 }
